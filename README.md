@@ -12,5 +12,6 @@ Students are expected to:
 Student Info
 =======================
 
-* Name: MyName
+* Name: Nguyen Thi Ly Linh
+* ID: M22.ICT.003
 
