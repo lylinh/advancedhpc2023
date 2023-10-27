@@ -1,0 +1,310 @@
+\documentclass[12pt]{article}
+\renewcommand{\baselinestretch}{1.2}
+\usepackage[utf8]{vietnam}
+\usepackage[a4paper, total={6in, 8in}]{geometry}
+\usepackage[english]{babel}
+\usepackage{hyperref}
+\usepackage{mathtools}
+\usepackage{amssymb}
+\usepackage{indentfirst}
+\usepackage{graphicx}
+\usepackage{minted}
+\usepackage{ragged2e}
+\usepackage{multirow}
+\usepackage{subcaption}
+\usepackage{xurl}
+\usepackage{amsmath}
+\usepackage{makecell}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\renewcommand\theadalign{bc}
+\renewcommand\theadfont{\bfseries}
+\renewcommand\theadgape{\Gape[4pt]}
+\renewcommand\cellgape{\Gape[4pt]}
+\usepackage{pbox}
+\usepackage{graphicx}
+\usepackage{diagbox}
+\usepackage{listings}
+\usepackage{xcolor}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    citecolor=blue,
+    urlcolor=blue,
+}
+\lstset{
+    backgroundcolor=\color{white},   
+    basicstyle=\footnotesize,       
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    commentstyle=\color{red},    
+    escapeinside={\%*}{*)},          
+    extendedchars=true,              
+    keepspaces=true,                 
+    keywordstyle=\color{blue},       
+    language=Python,                
+    numbers=left,                    
+    numbersep=5pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=2
+}
+\begin{document}
+\begin{center}
+    \vspace*{1.8cm}
+    \Large
+    Labwork6\\
+\end{center}
+
+\section{Labwork 6a}
+\subsection{Program}
+\begin{lstlisting}[language=Python]
+import numba
+import numpy as np
+import matplotlib.pyplot as plt
+from numba import cuda
+from numba import jit
+from matplotlib.image import imread
+import time
+
+# Load an image from a file
+image_path = 'labwork6-original.jpg'
+image = imread(image_path)
+plt.imshow(image), plt.title('Original')
+plt.show()
+
+# Get the image dimensions
+image_height = image.shape[0]
+image_width = image.shape[1]
+
+# Binarization Grayscale using GPU with 2D blocks
+@cuda.jit
+def binarization_gpu(src, dst, threshold):
+    x = cuda.threadIdx.x + cuda.blockIdx.x * cuda.blockDim.x
+    y = cuda.threadIdx.y + cuda.blockIdx.y * cuda.blockDim.y
+    g = np.uint8((src[x, y, 0] + src[x, y, 1] + src[x, y, 2]) // 3)
+    if g >= threshold:
+      g = 255
+    else:
+      g = 0
+    dst[x, y, 0] = dst[x, y, 1] = dst[x, y, 2] = g
+
+# Implement with GPU
+blockSizes = [(2,2),(4,4),(8, 8),(16, 16),(32,32),(32,22)]
+times_gpu = []
+threshold = 100
+counter = 0 
+sub = [133,134,135,136,137,138]
+for block_size in blockSizes:
+  devSrc = cuda.to_device(image)
+  devDst = cuda.device_array((image_height, image_width, 3), np.uint8)
+
+  grid_size_x = (image_height + block_size[0] - 1) // block_size[0]
+  grid_size_y = (image_width + block_size[1] - 1) // block_size[1]
+  start_time_gpu = time.time()
+  binarization_gpu[(grid_size_x, grid_size_y), block_size](devSrc, devDst, threshold)
+  time_gpu = time.time() - start_time_gpu
+  times_gpu.append(time_gpu)
+  print(f"Block size:({block_size[0]},{block_size[1]}), Time processing on GPU: {time_gpu}s")
+
+  hostDst = devDst.copy_to_host()
+  grayscale_gpu_image = np.array(hostDst)
+  plt.imsave(f'labwork6a-binarization_gpu_({block_size[0]},{block_size[1]}).jpg', grayscale_gpu_image, cmap='gray')
+  
+  plt.title(block_size)
+  plt.imshow(grayscale_gpu_image)
+  plt.show()
+\end{lstlisting}
+\subsection{Result}
+ \begin{lstlisting}[language=Python]
+Block size:(2,2), Time processing on GPU: 0.12934446334838867s
+Block size:(4,4), Time processing on GPU: 0.00103759765625s
+Block size:(8,8), Time processing on GPU: 0.0003185272216796875s
+Block size:(16,16), Time processing on GPU: 0.0004918575286865234s
+Block size:(32,32), Time processing on GPU: 0.00030732154846191406s
+\end{lstlisting}
+
+\section{Labwork 6b}
+\subsection{Program}
+\begin{lstlisting}[language=Python]
+import numba
+import numpy as np
+import matplotlib.pyplot as plt
+from numba import cuda
+from numba import jit
+from matplotlib.image import imread
+import time
+
+# Load an image from a file
+image_path = 'labwork6-original.jpg'
+image = imread(image_path)
+plt.subplot(131), plt.imshow(image), plt.title('Original')
+
+# Get the image dimensions
+image_height = image.shape[0]
+image_width = image.shape[1]
+
+# Brightness using GPU with 2D blocks
+@cuda.jit
+def brightness_gpu(src, dst, threshold, brightness):
+    x = cuda.threadIdx.x + cuda.blockIdx.x * cuda.blockDim.x
+    y = cuda.threadIdx.y + cuda.blockIdx.y * cuda.blockDim.y
+    if brightness > 0:
+      r = min(src[x, y, 0] + threshold, 255)
+      g = min(src[x, y, 1] + threshold, 255)
+      b = min(src[x, y, 2] + threshold, 255)
+    else:
+      r = max(src[x, y, 0] - threshold, 0)
+      g = max(src[x, y, 1] - threshold, 0)
+      b = max(src[x, y, 2] - threshold, 0)
+    dst[x, y, 0] = r
+    dst[x, y, 1] = g
+    dst[x, y, 2] = b
+
+# Implement with GPU
+blockSizes = [(2,2),(4,4),(8, 8),(16, 16),(32,32),(32,22)]
+times_gpu = []
+threshold = 100
+
+
+# Implement increasing brightness
+brightness = 1
+for block_size in blockSizes:
+  devSrc = cuda.to_device(image)
+  devDst = cuda.device_array((image_height, image_width, 3), np.uint8)
+
+  grid_size_x = (image_height + block_size[0] - 1) // block_size[0]
+  grid_size_y = (image_width + block_size[1] - 1) // block_size[1]
+  start_time_gpu = time.time()
+  brightness_gpu[(grid_size_x, grid_size_y), block_size](devSrc, devDst, threshold, brightness)
+  time_gpu = time.time() - start_time_gpu
+  times_gpu.append(time_gpu)
+  print(f"Block size:({block_size[0]},{block_size[1]}), Time processing on GPU: {time_gpu}s")
+
+  hostDst = devDst.copy_to_host()
+  grayscale_gpu_image = np.array(hostDst)
+  plt.imsave(f'labwork6b-brightness_increasing_({block_size[0]},{block_size[1]}).jpg', grayscale_gpu_image, cmap='gray')
+  
+  plt.title(block_size)
+  plt.imshow(grayscale_gpu_image)
+  plt.show()
+
+# Implement decreasing brightness
+brightness = 0
+for block_size in blockSizes:
+  devSrc = cuda.to_device(image)
+  devDst = cuda.device_array((image_height, image_width, 3), np.uint8)
+
+  grid_size_x = (image_height + block_size[0] - 1) // block_size[0]
+  grid_size_y = (image_width + block_size[1] - 1) // block_size[1]
+  start_time_gpu = time.time()
+  brightness_gpu[(grid_size_x, grid_size_y), block_size](devSrc, devDst, threshold, brightness)
+  time_gpu = time.time() - start_time_gpu
+  times_gpu.append(time_gpu)
+  print(f"Block size:({block_size[0]},{block_size[1]}), Time processing on GPU: {time_gpu}s")
+
+  hostDst = devDst.copy_to_host()
+  grayscale_gpu_image = np.array(hostDst)
+  plt.imsave(f'labwork6b-brightness_decreasing_({block_size[0]},{block_size[1]}).jpg', grayscale_gpu_image, cmap='gray')
+  
+  plt.title(block_size)
+  plt.imshow(grayscale_gpu_image)
+  plt.show()
+\end{lstlisting}
+\subsection{Result}
+\begin{lstlisting}[language=Python]
+Block size:(2,2), Time processing on GPU: 0.14322471618652344s
+Block size:(4,4), Time processing on GPU: 0.00029587745666503906s
+Block size:(8,8), Time processing on GPU: 0.000308990478515625s
+Block size:(16,16), Time processing on GPU: 0.0003211498260498047s
+Block size:(32,32), Time processing on GPU: 0.00028586387634277344s
+Block size:(32,22), Time processing on GPU: 0.0002949237823486328s
+
+Block size:(2,2), Time processing on GPU: 0.0003032684326171875s
+Block size:(4,4), Time processing on GPU: 0.0002770423889160156s
+Block size:(8,8), Time processing on GPU: 0.0002770423889160156s
+Block size:(16,16), Time processing on GPU: 0.00028014183044433594s
+Block size:(32,32), Time processing on GPU: 0.0003273487091064453s
+Block size:(32,22), Time processing on GPU: 0.0002617835998535156s
+\end{lstlisting}
+
+\section{Labwork 6c}
+\subsection{Program}
+\begin{lstlisting}[language=Python]
+import numba
+import numpy as np
+import matplotlib.pyplot as plt
+from numba import cuda
+from numba import jit
+from matplotlib.image import imread
+import time
+
+# Load images
+first_image_path = 'labwork6c_first_image.jpg'
+second_image_path = 'labwork6c_second_image.jpg'
+first_image = imread(first_image_path)
+second_image = imread(second_image_path)
+plt.subplot(131), plt.imshow(first_image), plt.title('First image')
+plt.subplot(132), plt.imshow(second_image), plt.title('Second image')
+
+# Get the image dimensions
+image_height = first_image.shape[0]
+image_width = first_image.shape[1]
+
+# Blending using GPU with 2D blocks
+@cuda.jit
+def blending_gpu(first_src, second_src, dst, c):
+    x = cuda.threadIdx.x + cuda.blockIdx.x * cuda.blockDim.x
+    y = cuda.threadIdx.y + cuda.blockIdx.y * cuda.blockDim.y
+    dst[x, y, 0] = first_src[x, y, 0] * c + (1 - c) * second_src[x, y, 0]
+    dst[x, y, 1] = first_src[x, y, 1] * c + (1 - c) * second_src[x, y, 1]
+    dst[x, y, 2] = first_src[x, y, 2] * c + (1 - c) * second_src[x, y, 2]
+
+# Implement with GPU
+blockSizes = [(2,2),(4,4),(8, 8),(16, 16),(32,32),(32,22)]
+times_gpu = []
+c = 0.8
+plt.show()
+
+# Implement blending
+for block_size in blockSizes:
+  first_devSrc = cuda.to_device(first_image)
+  second_devSrc = cuda.to_device(second_image)
+
+  devDst = cuda.device_array((image_height, image_width, 3), np.uint8)
+
+  grid_size_x = (image_height + block_size[0] - 1) // block_size[0]
+  grid_size_y = (image_width + block_size[1] - 1) // block_size[1]
+  start_time_gpu = time.time()
+  blending_gpu[(grid_size_x, grid_size_y), block_size](first_devSrc, second_devSrc, devDst, c)
+  time_gpu = time.time() - start_time_gpu
+  times_gpu.append(time_gpu)
+  print(f"Block size:({block_size[0]},{block_size[1]}), Time processing on GPU: {time_gpu}s")
+
+  hostDst = devDst.copy_to_host()
+  blending_gpu_image = np.array(hostDst)
+  plt.imsave(f'labwork6c-blending_({block_size[0]},{block_size[1]}).jpg', blending_gpu_image, cmap='gray')
+  
+  plt.title(block_size)
+  plt.imshow(blending_gpu_image)
+  plt.show()
+\end{lstlisting}
+\subsection{Result}
+\begin{lstlisting}[language=Python]
+Block size:(2,2), Time processing on GPU: 0.16482853889465332s
+Block size:(4,4), Time processing on GPU: 0.00038814544677734375s
+Block size:(8,8), Time processing on GPU: 0.0002799034118652344s
+Block size:(16,16), Time processing on GPU: 0.00036215782165527344s
+Block size:(32,32), Time processing on GPU: 0.00032329559326171875s
+Block size:(32,22), Time processing on GPU: 0.0003104209899902344s
+\end{lstlisting}
+
+\section{Discussion}
+I have tried to implement in different block sizes in several time. 
+We can see the speed will increase if we increase the block size.
+The second time is always faster than the first time because it takes a lot of time for initiation.
+
+\end{document}
